@@ -93,22 +93,14 @@ def topic_generation(state: StateType) -> StateType:
     result = llm.invoke(prompt).content
     print(result)
 
-    print("DEBUG - Raw LLM Response:", result)  # Debugging
+    # print("DEBUG - Raw LLM Response:", result)  # Debugging
     
     # Parse the response into a Pydantic model
     try:
         parsed_response = parser_topic_gen.parse(result)
     except Exception as e:
         raise ValueError(f"Failed to parse response: {e}\nResponse: {result}")
-    
-    # # Validate the parsed response
-    # if len(parsed_response.broaderTopics) != num_broader_topics:
-    #     raise ValueError(f"Expected {num_broader_topics} broader topics, got {len(parsed_response.broaderTopics)}")
-    
-    # for topic in parsed_response.broaderTopics:
-    #     if len(topic.subtopics) != num_subtopics:
-    #         raise ValueError(f"Expected {num_subtopics} subtopics for {topic.broaderTopic}, got {len(topic.subtopics)}")
-    
+
     # Update the state with parsed topics
     state["topics"] = parsed_response.model_dump_json(indent=2)  # Correctly dump the JSON from the Pydantic model
     return state
@@ -179,50 +171,6 @@ def topic_categorization(state: StateType) -> StateType:
     return state
 
 
-class QuestionStyle(str, Enum):
-    NEGATIVE = "negative"
-    POSITIVE = "positive"
-    INFORMATION = "information_oriented"
-    CLOSED = "closed"
-    FUNNEL = "funnel"
-    RECALL = "recall"
-    RHETORICAL = "rhetorical"
-    PROBING = "probing"
-    LEADING = "leading"
-    DIVERGENT = "divergent"
-    REDIRECT = "redirect"
-
-class TopicLink(BaseModel):
-    primary_topic: str = Field(description="The main topic being questioned about")
-    linked_topics: List[str] = Field(description="Other topics that are linked in this question")
-    relationship: str = Field(description="Description of how these topics are interrelated")
-
-class Question(BaseModel):
-    question_id: str = Field(description="Unique identifier for the question")
-    question_text: str = Field(description="The actual question text")
-    question_style: QuestionStyle = Field(description="The style of questioning used")
-    difficulty_level: str = Field(description="Difficulty level: easy/medium/hard/very_hard")
-    topic_links: TopicLink = Field(description="Information about how topics are linked in this question")
-    expected_response_type: str = Field(description="Type of response expected (e.g., explanation, analysis, comparison)")
-    learning_objective: str = Field(description="The specific learning objective this question addresses")
-    suggested_answer_points: List[str] = Field(description="Key points that should be covered in the answer")
-
-class QuestionSet(BaseModel):
-    questions: List[Question] = Field(description="Set of generated questions")
-    coverage_summary: dict = Field(description="Summary of topic and style coverage in the question set")
-
-# Create a parser
-parser_question_gen = PydanticOutputParser(pydantic_object=QuestionSet)
-
-# def question_generation(state: StateType) -> StateType:
-#     prompt = PromptTemplate.from_template(
-#         "Generate questions for these categorized topics: {categorized_topics}",
-#         partial_variables= {"format_instructions": parser_question_gen.get_format_instructions()}
-#     )
-#     result = llm(prompt.format(categorized_topics=state["categorized_topics"]))
-#     state["questions"] = result
-#     return state
-
 def question_style_diversification(state: StateType) -> StateType:
     prompt_template = PromptTemplate.from_template(
         '''# Chemical Engineering Assessment Style Generator 
@@ -236,8 +184,8 @@ def question_style_diversification(state: StateType) -> StateType:
         3. **Sub-Topics:** : []
 
         ## Output Format - Only JSON and no other information.
+        - Sample Output format: 
         
-        ```json
         {{
         "question_styles": [
             {{
@@ -249,36 +197,46 @@ def question_style_diversification(state: StateType) -> StateType:
             }}
         ]
         }}
-        ```
 
         ## Style Naming Conventions: 
         - Use explicit, descriptive names 
         - Include the primary assessment method in the name 
-        - Format: [Assessment Type]
-        -[Focus Area] - 
-
-        Examples: 
-
-        * "Core Principles Assessment - Transport Phenomena" 
-        * "Numerical Problem Solving - Heat Transfer" 
-        * "Industrial Case Study - Process Optimization" 
+        - Format: [Assessment Type] - [Focus Area] 
 
         ## Evaluation Guidelines: 
-
-        1. **Style Names Should:** - Be self-explanatory and specific - Indicate both method and content area - Reflect the complexity level - Align with job requirements 
-        2. **Definitions Should:** - Clearly state what the style involves - Indicate the type of response expected - Specify any special conditions or requirements - Be concise yet comprehensive 
-        3. **Examples Should:** - Be directly related to the style - Be specific enough to demonstrate the style - Be realistic and industry-relevant - Match the job level requirements 
-        4. **Assessment Goals Should:** - Specify clear evaluation criteria - Link to job requirements - Cover both technical and soft skills where relevant - Be measurable or observable 
-        5. **Topic Matching Should:** - Only include relevant sub-topics from input - Be specific rather than general - Consider prerequisite knowledge - Align with job requirements 
+        1. **Style Names Should:** 
+            - Be self-explanatory and specific 
+            - Indicate both method and content area 
+            - Reflect the complexity level 
+            - Align with job requirements 
+        2. **Definitions Should:** 
+            - Clearly state what the style involves 
+            - Indicate the type of response expected 
+            - Specify any special conditions or requirements 
+            - Be concise yet comprehensive 
+        3. **Examples Should:** 
+            - Be directly related to the style 
+            - Be specific enough to demonstrate the style 
+            - Be realistic and industry-relevant 
+            - Match the job level requirements 
+        4. **Assessment Goals Should:** 
+            - Specify clear evaluation criteria 
+            - Link to job requirements 
+            - Cover both technical and soft skills where relevant 
+            - Be measurable or observable 
+        5. **Topic Matching Should:** 
+            - Only include relevant sub-topics from input 
+            - Be specific rather than general 
+            - Consider prerequisite knowledge 
+            - Align with job requirements 
 
         ### Important Notes:
         1. Respond **only in the JSON format**.
         2. Do not include additional text, comments, or explanations.
         3. Ensure the JSON is well-formed and adheres strictly to the schema provided.
-
+        
         ## Usage Notes: 
-
-        1. Generate at least one style for each major job requirement 
+        1. Generate at least one style for each major job requirement and there should be a total 15 different styles generated.
         2. Ensure styles cover both technical and practical aspects 
         3. Match complexity to job level 
         4. Include styles that assess both specific knowledge and broader capabilities 
@@ -296,6 +254,61 @@ def question_style_diversification(state: StateType) -> StateType:
     result = llm.invoke(prompt).content
     print(result)
     state["diversified_questions"] = result
+    return state
+
+import json
+
+def collect_style_feedback(state: StateType) -> StateType:
+    """
+    Presents each generated question style to the user for feedback and updates the state with liked styles.
+    """
+    diversified_questions = state.get("diversified_questions")
+    if not diversified_questions:
+        raise ValueError("No 'diversified_questions' found in the state.")
+
+    try:
+        styles_json = json.loads(diversified_questions)
+        question_styles = styles_json.get("question_styles", [])
+    except json.JSONDecodeError:
+        raise ValueError("'diversified_questions' is not valid JSON.")
+
+    liked_styles = []
+    disliked_styles = []
+
+    print("\n### Please provide feedback on the generated question styles ###\n")
+
+    for idx, style in enumerate(question_styles, start=1):
+        print(f"Style {idx}:")
+        print(f"  - **Name:** {style['style_name']}")
+        print(f"  - **Definition:** {style['definition']}")
+        print(f"  - **Example:** {style['example']}")
+        print(f"  - **Assessment Goal:** {style['assessment_goal']}")
+        print(f"  - **Suitable Topics:** {', '.join(style['suitable_for_topics'])}\n")
+
+        while True:
+            feedback = input("Do you **like** this style? (enter 'like' or 'dislike'): ").strip().lower()
+            if feedback in ['like', 'dislike']:
+                break
+            else:
+                print("Invalid input. Please enter 'like' or 'dislike'.")
+
+        if feedback == 'like':
+            liked_styles.append(style)
+        else:
+            disliked_styles.append(style)
+        print()  # Add a newline for better readability
+
+    if not liked_styles:
+        raise ValueError("No styles were liked. Please ensure at least one style is liked.")
+
+    # Update the state with liked and disliked styles
+    state["liked_question_styles"] = liked_styles
+    state["disliked_question_styles"] = disliked_styles
+
+    print("### Feedback Collection Complete ###\n")
+    print(f"Liked Styles: {len(liked_styles)}")
+    print(f"Disliked Styles: {len(disliked_styles)}\n")
+
     return state
 
 def interlinking_question_creation(state: StateType) -> StateType:
@@ -322,7 +335,8 @@ def interlinking_question_creation(state: StateType) -> StateType:
 
 
              ## Output Format - Only JSON and no other information.
-            ```json
+            - Sample output format:
+
             {{
             "topicPairs": [{{
             "topics": "",
@@ -332,12 +346,10 @@ def interlinking_question_creation(state: StateType) -> StateType:
             "priority": "high/medium/low"
             }}]
             }}
-            ```
-
-
+            
 
             ## Example Valid Response Excerpt
-            ```json
+            
             {{
             "topicPairs": [
             {{
@@ -356,7 +368,7 @@ def interlinking_question_creation(state: StateType) -> StateType:
             }}
             ]
             }}
-            ```
+            
             ### Important Notes:
             1. Respond **only in the JSON format**.
             2. Do not include additional text, comments, or explanations.
@@ -383,56 +395,78 @@ def interlinking_question_creation(state: StateType) -> StateType:
     return state
 
 def assessment_compilation(state: StateType) -> StateType:
+    """
+    Generates the final assessment questions based on liked question styles and interlinking topic pairs.
+    """
     prompt_template = PromptTemplate.from_template(
         '''## Purpose
-        Purpose Generate specific assessment Multiple Choice questions based on chosen question style and topic combinations. 
+        Purpose: Generate specific assessment Multiple Choice questions based on chosen question styles and topic combinations. 
+        
         ## Input Parameters
-        1. **Question Style Selection:**”: {question_style}
-        2. **Topic Combination:**: {interlinking_response}
-        3. **Job Description:** : {JD}
+        1. **Liked Question Styles:** {liked_question_styles}
+        2. **Topic Combinations:** {interlinking_response}
+        3. **Job Description:** {JD}
+        
         ## Instructions
-        1. Using the selected question style and topic combination, generate a set of 10 questions that:
-        - Follows the question style's approach
-        - Integrates both topics from the combination
-        - Aligns with the job level
-        - Reflects the industry context
-        - Maps to specific job responsibilities
-
-        ## Output Format
-        ```json
+        1. Using the selected question styles and topic combinations, generate a set of 10 questions that:
+            - Follow each question style's approach.
+            - Integrate both topics from the combination.
+            - Align with the job level.
+            - Reflect the industry context.
+            - Map to specific job responsibilities.
+        
+        ## Output Format - Only JSON and no other information.
+        - Sample Output format:
         {{
-            "question": "[question without options catering to the instructions and input provided]",
-            "options": "[options for the question]",
-            "correct_answer": "[correct answer for the question]",
-            "style": "[]",
-            "topics": [<topics will >],
+            "questions": [
+                {{
+                    "question": "[question without options catering to the instructions and input provided]",
+                    "options": "[options for the question]",
+                    "correct_answer": "[correct answer for the question]",
+                    "style": "[style_name]",
+                    "topics": [<topics>]
+                }},
+                ...
+            ]
         }}
-        ```
-
+        
+        
         ## Usage Guidelines
-        1. Questions should require integration of both topics
-        2. Maintain consistency with the selected question style
-        3. Include relevant industry context
-        4. Match complexity to job level
-        5. Align with rationale provided for topic combination
-
+        1. Questions should require integration of both topics.
+        2. Maintain consistency with the selected question styles.
+        3. Include relevant industry context.
+        4. Match complexity to job level.
+        5. Align with rationale provided for topic combinations.
+        
         ## Validation Criteria
-        1. Question reflects the style definition
-        2. Both topics are meaningfully incorporated
-        3. Complexity matches job requirements
-        4. Context matches industry setting
-        5. Clear connection to job responsibilities
+        1. Question reflects the style definition.
+        2. Both topics are meaningfully incorporated.
+        3. Complexity matches job requirements.
+        4. Context matches industry setting.
+        5. Clear connection to job responsibilities.
         '''
     )
+
+    # Ensure 'liked_question_styles' exists in the state
+    if "liked_question_styles" not in state:
+        raise ValueError("Missing 'liked_question_styles' in state.")
+
+    # Serialize liked_question_styles to JSON string for the prompt
+    liked_styles_json = json.dumps(state["liked_question_styles"], indent=2)
+
     prompt = prompt_template.format(
-        question_style=state["diversified_questions"],
+        liked_question_styles=liked_styles_json,
         JD=state["job_description"],
         interlinking_response=state["interlinking_questions"]
     )
+    
     result = llm.invoke(prompt).content
+    print("\n### Final Assessment Compilation Generated ###\n")
     print(result)
+    
     state["final_assessment"] = result
     return state
+
 
 # Create the graph
 workflow = Graph()
@@ -441,8 +475,8 @@ workflow = Graph()
 workflow.add_node("job_description", job_description_analysis)
 workflow.add_node("topic_generation", topic_generation)
 workflow.add_node("topic_categorization", topic_categorization)
-# workflow.add_node("question_generation", question_generation)
 workflow.add_node("question_style_diversification", question_style_diversification)
+workflow.add_node("collect_style_feedback", collect_style_feedback)  # New Node
 workflow.add_node("interlinking_question_creation", interlinking_question_creation)
 workflow.add_node("assessment_compilation", assessment_compilation)
 
@@ -450,13 +484,11 @@ workflow.add_node("assessment_compilation", assessment_compilation)
 workflow.add_edge("job_description", "topic_generation")
 workflow.add_edge("topic_generation", "topic_categorization")
 workflow.add_edge("topic_categorization", "question_style_diversification")
-# workflow.add_edge("question_generation", "question_style_diversification")
-workflow.add_edge("question_style_diversification", "interlinking_question_creation")
-# workflow.add_edge("question_generation", "assessment_compilation")
-# workflow.add_edge("question_style_diversification", "assessment_compilation")
+workflow.add_edge("question_style_diversification", "collect_style_feedback")  # New Edge
+workflow.add_edge("collect_style_feedback", "interlinking_question_creation")  # New Edge
 workflow.add_edge("interlinking_question_creation", "assessment_compilation")
 
-# Set the entrypoint
+# Set the entry point
 workflow.set_entry_point("job_description")
 
 # Compile the graph
